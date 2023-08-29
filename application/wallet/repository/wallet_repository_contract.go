@@ -8,5 +8,5 @@ import (
 
 type WalletRepositoryContract interface {
 	Create(db *gorm.DB, data domain.Wallet) (err error)
-	UpdateBalace(db *gorm.DB, price float64) (err error)
+	UpdateBalace(db *gorm.DB, price float64, userID int, walletID int) (err error)
 }

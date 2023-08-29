@@ -8,7 +8,7 @@ import (
 
 type WalletRepository struct{}
 
-func NewUserRepository() *WalletRepository {
+func NewWalletRepository() *WalletRepository {
 	return &WalletRepository{}
 }
 
@@ -17,7 +17,7 @@ func (obj WalletRepository) Create(db *gorm.DB, data domain.Wallet) (err error) 
 	return
 }
 
-func (obj WalletRepository) UpdateBalace(db *gorm.DB, price float64) (err error) {
-	err = db.Debug().Table("wallet").UpdateColumn("balance", gorm.Expr("balance + ?", price)).Error
+func (obj WalletRepository) UpdateBalace(db *gorm.DB, price float64, userID int, walletID int) (err error) {
+	err = db.Debug().Table("wallet").Where("userid = ? AND id = ?", userID, walletID).UpdateColumn("balance", gorm.Expr("balance + ?", price)).Error
 	return
 }

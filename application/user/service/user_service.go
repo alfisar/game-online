@@ -1,9 +1,12 @@
 package service
 
 import (
-	_repositorySession "game-online/application/session/repository"
+	_repositoryRedis "game-online/application/redis/repository"
 	"game-online/application/user/repository"
 	_repositoryWallet "game-online/application/wallet/repository"
+	_database "game-online/internal/database"
+	"strconv"
+
 	"game-online/config"
 	"game-online/domain"
 	"game-online/internal/errorhandler"
@@ -16,16 +19,16 @@ import (
 )
 
 type UserService struct {
-	repo        repository.UserRepositoryContract
-	repoWallet  _repositoryWallet.WalletRepositoryContract
-	repoSession _repositorySession.SessionRepositoryContract
+	repo       repository.UserRepositoryContract
+	repoWallet _repositoryWallet.WalletRepositoryContract
+	repoRedis  _repositoryRedis.RedisRepositoryContract
 }
 
-func NewUserService(repo repository.UserRepositoryContract, repoWallet _repositoryWallet.WalletRepositoryContract, repoSession _repositorySession.SessionRepositoryContract) *UserService {
+func NewUserService(repo repository.UserRepositoryContract, repoWallet _repositoryWallet.WalletRepositoryContract, repoRedis _repositoryRedis.RedisRepositoryContract) *UserService {
 	return &UserService{
-		repo:        repo,
-		repoWallet:  repoWallet,
-		repoSession: repoSession,
+		repo:       repo,
+		repoWallet: repoWallet,
+		repoRedis:  repoRedis,
 	}
 }
 
@@ -59,6 +62,7 @@ func (obj *UserService) Create(db *gorm.DB, data domain.User) (err errorhandler.
 }
 
 func (obj *UserService) Login(db *gorm.DB, username string, pass string) (token string, err errorhandler.ErrorData) {
+
 	userData, errData := obj.repo.GetByUsername(db, username)
 	if errData != nil {
 		err = errorhandler.ErrorMapping(1001, "terjadi kesalahan - GO-1001", errData)
@@ -74,24 +78,36 @@ func (obj *UserService) Login(db *gorm.DB, username string, pass string) (token 
 		return
 	}
 
+	key := "token_user_" + strconv.Itoa(userData.ID)
+	token, errData = obj.repoRedis.Get(key)
+	if errData != nil && errData.Error() != "redis: nil" {
+		err = errorhandler.ErrorMapping(1002, "terjadi kesalahan - GO-1002", errData)
+		return
+	} else if token != "" {
+		return
+	}
+
 	cfg := config.GetConfig()
 
 	objJwt := jwthandler.JwtHandler{
 		Secret: cfg.JWTSecret,
 	}
 
-	token, errData = objJwt.GetToken(time.Duration(cfg.SessionEXP)*time.Minute, userData.ID)
+	sessionDuration := time.Duration(cfg.SessionEXP) * time.Minute
+	token, errData = objJwt.GetToken(sessionDuration, userData.ID)
 	if errData != nil {
 		err = errorhandler.ErrorMapping(1002, "terjadi kesalahan - GO-1002", errData)
 		return
 	}
 
-	sessionData := domain.Session{
-		UserID: userData.ID,
-		Token:  token,
-	}
+	go obj.repoRedis.Insert(key, token, sessionDuration)
 
-	errData = obj.repoSession.Create(db, sessionData)
+	return
+}
+
+func (obj *UserService) Logout(db *gorm.DB, userID int) (err errorhandler.ErrorData) {
+	key := "token_user_" + strconv.Itoa(userID)
+	errData := obj.repoRedis.Delete(key)
 	if errData != nil {
 		err = errorhandler.ErrorMapping(1001, "terjadi kesalahan - GO-1001", errData)
 		return
@@ -99,11 +115,22 @@ func (obj *UserService) Login(db *gorm.DB, username string, pass string) (token 
 	return
 }
 
-func (obj *UserService) Logout(db *gorm.DB, userID int) (err errorhandler.ErrorData) {
-	errData := obj.repoSession.DeleteByUserID(db, userID)
+func (obj *UserService) GetList(db *gorm.DB, page int, limit int, search string) (result []domain.UserDetail, pagination _database.Pagination, err errorhandler.ErrorData) {
+	result, pagination, errData := obj.repo.GetList(db, page, limit, search)
 	if errData != nil {
-		err = errorhandler.ErrorMapping(1001, "terjadi kesalahan - GO-1001", errData)
+		err = errorhandler.ErrorMapping(1001, "Terjadi kesalahan - GO-1001", errData)
 		return
 	}
+
+	return
+}
+
+func (obj *UserService) GetByID(db *gorm.DB, userID int) (result domain.UserDetail, err errorhandler.ErrorData) {
+	result, errData := obj.repo.GetByID(db, userID)
+	if errData != nil {
+		err = errorhandler.ErrorMapping(1001, "Terjadi kesalahan - GO-1001", errData)
+		return
+	}
+
 	return
 }
